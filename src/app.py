@@ -8,11 +8,26 @@ from flask_swagger import swagger
 from flask_cors import CORS
 from utils import APIException, generate_sitemap
 from admin import setup_admin
-from models import db, User, People, Planets, Vehicles, FavoritePeople, FavoritePlanets, FavoriteVehicles
+from models import db, User, People, Planets, Vehicles, FavoritePeople, FavoritePlanets, FavoriteVehicles, TokenBlockedList
 #from models import Person
+
+from flask_jwt_extended import create_access_token
+from flask_jwt_extended import get_jwt_identity, get_jwt
+from flask_jwt_extended import jwt_required
+from flask_jwt_extended import JWTManager
+
+from datetime import date, time, datetime, timezone, timedelta
+
+from flask_bcrypt import Bcrypt
 
 app = Flask(__name__)
 app.url_map.strict_slashes = False
+
+#inicio de instancia de JWT
+app.config["JWT_SECRET_KEY"] = os.getenv("FLASK_APP_KEY")
+jwt = JWTManager(app)
+
+bcrypt = Bcrypt(app) #inicio mi instancia de Bcrypt
 
 db_url = os.getenv("DATABASE_URL")
 if db_url is not None:
@@ -25,6 +40,16 @@ MIGRATE = Migrate(app, db)
 db.init_app(app)
 CORS(app)
 setup_admin(app)
+
+def verificacionToken(jti):
+    jti#Identificador del JWT (es más corto)
+    print("jit", jti)
+    token = TokenBlockedList.query.filter_by(token=jti).first()
+
+    if token is None:
+        return False
+    
+    return True
 
 # Handle/serialize errors like a JSON object
 @app.errorhandler(APIException)
@@ -73,20 +98,70 @@ def register_user():
     if user is not None:
         raise APIException("Email is already registered", status_code=409)
     
-    new_user = User(email=email, name=name, password=password, is_active=is_active)
+    password_encrypted = bcrypt.generate_password_hash(password,10).decode("utf-8")
+    
+    new_user = User(email=email, name=name, password=password_encrypted, is_active=is_active)
 
     db.session.add(new_user)
     db.session.commit()
 
     return jsonify({"mensaje":"Usuario creado correctamente"}), 201
 
-@app.route('/get-user/<int:id>', methods=['GET'])
+@app.route('/login', methods=['POST'])
+def login():
+    body = request.get_json()
+    email=body["email"]
+    password = body["password"]
+
+    user = User.query.filter_by(email=email).first()
+
+    if user is None:
+        return jsonify({"message":"Login failed"}), 401
+
+    #validar el password encriptado
+    if not bcrypt.check_password_hash(user.password, password):
+        return jsonify({"message":"Login failed"}), 401
+    
+    access_token = create_access_token(identity=user.id)
+    return jsonify({"token":access_token}), 200
+
+@app.route('/logout', methods=['POST'])
+@jwt_required()
+def logout():
+    jti = get_jwt()["jti"] #Identificador del JWT (es más corto)
+    now = datetime.now(timezone.utc)
+
+    #identificamos al usuario
+    current_user = get_jwt_identity()
+    user = User.query.get(current_user)
+
+    tokenBlocked = TokenBlockedList(token=jti , created_at=now, email=user.email)
+    db.session.add(tokenBlocked)
+    db.session.commit()
+
+    return jsonify({"message":"logout successfully"})
+
+@app.route("/protected", methods=["GET"])
+@jwt_required()
+def protected():
+    # Access the identity of the current user with get_jwt_identity
+    current_user = get_jwt_identity()
+    user = User.query.get(current_user)
+
+    token = verificacionToken(get_jwt()["jti"]) #reuso la función de verificacion de token
+    if token:
+       raise APIException('Token está en lista negra', status_code=404)
+
+    print("EL usuario es: ", user.name)
+    return jsonify({"message":"Estás en una ruta protegida"}), 200
+
+@app.route('/user/<int:id>', methods=['GET'])
 def get_specific_user(id):
     user = User.query.get(id)    
   
     return jsonify(user.serialize()), 200
 
-@app.route('/get-user', methods=['POST'])
+@app.route('/user-with-post', methods=['POST'])
 def get_specific_user_with_post():
     body = request.get_json()   
     id = body["id"]
@@ -95,7 +170,7 @@ def get_specific_user_with_post():
   
     return jsonify(user.serialize()), 200
 
-@app.route('/get-user', methods=['DELETE'])
+@app.route('/user', methods=['DELETE'])
 def delete_specific_user():
     body = request.get_json()   
     id = body["id"]
@@ -107,7 +182,7 @@ def delete_specific_user():
   
     return jsonify("Usuario borrado"), 200
 
-@app.route('/get-user', methods=['PUT'])
+@app.route('/user', methods=['PUT'])
 def edit_user():
     body = request.get_json()   
     id = body["id"]
@@ -143,7 +218,7 @@ def get_all_people():
 
     return jsonify(response_body), 200
 
-@app.route('/add-people', methods=['POST'])
+@app.route('/people', methods=['POST'])
 def add_people():
     body = request.get_json()
     name = body["name"]
@@ -169,13 +244,13 @@ def add_people():
 
     return jsonify({"mensaje":"People creado correctamente"}), 201
 
-@app.route('/get-people/<int:id>', methods=['GET'])
+@app.route('/people/<int:id>', methods=['GET'])
 def get_specific_people(id):
     people = People.query.get(id)    
   
     return jsonify(people.serialize()), 200
 
-@app.route('/get-people', methods=['POST'])
+@app.route('/people-with-post', methods=['POST'])
 def get_specific_people_with_post():
     body = request.get_json()   
     id = body["id"]
@@ -184,19 +259,19 @@ def get_specific_people_with_post():
   
     return jsonify(people.serialize()), 200
 
-@app.route('/get-people', methods=['DELETE'])
+@app.route('/people', methods=['DELETE'])
 def delete_specific_people():
     body = request.get_json()   
     id = body["id"]
 
-    people = People.query.get(id) 
+    people = People.query.get(id)
 
     db.session.delete(people)
     db.session.commit()  
   
     return jsonify("People borrado"), 200
 
-@app.route('/get-people', methods=['PUT'])
+@app.route('/people', methods=['PUT'])
 def edit_people():
     body = request.get_json()   
     id = body["id"]
@@ -244,7 +319,7 @@ def get_all_planets():
 
     return jsonify(response_body), 200
 
-@app.route('/add-planet', methods=['POST'])
+@app.route('/planets', methods=['POST'])
 def add_planet():
     body = request.get_json()
     name = body["name"]
@@ -270,13 +345,13 @@ def add_planet():
 
     return jsonify({"mensaje":"Planet creado correctamente"}), 201
 
-@app.route('/get-planet/<int:id>', methods=['GET'])
+@app.route('/planets/<int:id>', methods=['GET'])
 def get_specific_planet(id):
     planet = Planets.query.get(id)    
   
     return jsonify(planet.serialize()), 200
 
-@app.route('/get-planet', methods=['POST'])
+@app.route('/planet-with-post', methods=['POST'])
 def get_specific_planet_with_post():
     body = request.get_json()   
     id = body["id"]
@@ -285,7 +360,7 @@ def get_specific_planet_with_post():
   
     return jsonify(planet.serialize()), 200
 
-@app.route('/get-planet', methods=['DELETE'])
+@app.route('/planets', methods=['DELETE'])
 def delete_specific_planet():
     body = request.get_json()   
     id = body["id"]
@@ -297,7 +372,7 @@ def delete_specific_planet():
   
     return jsonify("Planet borrado"), 200
 
-@app.route('/get-planet', methods=['PUT'])
+@app.route('/planets', methods=['PUT'])
 def edit_planet():
     body = request.get_json()   
     id = body["id"]
@@ -345,7 +420,7 @@ def get_all_vehicles():
 
     return jsonify(response_body), 200
 
-@app.route('/add-vehicle', methods=['POST'])
+@app.route('/vehicles', methods=['POST'])
 def add_vehicle():
     body = request.get_json()
     name = body["name"]
@@ -371,13 +446,13 @@ def add_vehicle():
 
     return jsonify({"mensaje":"Vehicle creado correctamente"}), 201
 
-@app.route('/get-vehicle/<int:id>', methods=['GET'])
+@app.route('/vehicles/<int:id>', methods=['GET'])
 def get_specific_vehicle(id):
     vehicle = Vehicles.query.get(id)    
   
     return jsonify(vehicle.serialize()), 200
 
-@app.route('/get-vehicle', methods=['POST'])
+@app.route('/vehicles-with-post', methods=['POST'])
 def get_specific_vehicle_with_post():
     body = request.get_json()   
     id = body["id"]
@@ -386,7 +461,7 @@ def get_specific_vehicle_with_post():
   
     return jsonify(vehicle.serialize()), 200
 
-@app.route('/get-vehicle', methods=['DELETE'])
+@app.route('/vehicles', methods=['DELETE'])
 def delete_specific_vehicle():
     body = request.get_json()   
     id = body["id"]
@@ -398,7 +473,7 @@ def delete_specific_vehicle():
   
     return jsonify("Vehicle borrado"), 200
 
-@app.route('/get-vehicle', methods=['PUT'])
+@app.route('/vehicles', methods=['PUT'])
 def edit_vehicle():
     body = request.get_json()   
     id = body["id"]
@@ -432,7 +507,7 @@ def edit_vehicle():
 ############################################################# FAVORITES:
 ############################################################# FAVORITES:
 
-@app.route('/add-favorite/people', methods=['POST'])
+@app.route('/favorite/people', methods=['POST'])
 def add_favorite_people():
     body = request.get_json()
     user_id = body["user_id"]
@@ -460,7 +535,7 @@ def add_favorite_people():
         "user": favorite_people.serialize()["user_name"]
     }), 201
 
-@app.route('/remove-favorite/people', methods=['DELETE'])
+@app.route('/favorite/people', methods=['DELETE'])
 def remove_favorite_people():
     body = request.get_json()
     user_id = body["user_id"]
@@ -476,7 +551,7 @@ def remove_favorite_people():
 
     return jsonify({"msg":"Favorite people removed successfully"}), 200
 
-@app.route('/add-favorite/planet', methods=['POST'])
+@app.route('/favorite/planet', methods=['POST'])
 def add_favorite_planet():
     body = request.get_json()
     user_id = body["user_id"]
@@ -504,7 +579,7 @@ def add_favorite_planet():
         "user": favorite_planet.serialize()["user_name"]
     }), 201
 
-@app.route('/remove-favorite/planet', methods=['DELETE'])
+@app.route('/favorite/planet', methods=['DELETE'])
 def remove_favorite_planet():
     body = request.get_json()
     user_id = body["user_id"]
@@ -520,7 +595,7 @@ def remove_favorite_planet():
 
     return jsonify({"msg":"Favorite planet removed successfully"}), 200
 
-@app.route('/add-favorite/vehicle', methods=['POST'])
+@app.route('/favorite/vehicle', methods=['POST'])
 def add_favorite_vehicle():
     body = request.get_json()
     user_id = body["user_id"]
@@ -549,7 +624,7 @@ def add_favorite_vehicle():
     }), 201
 
 
-@app.route('/remove-favorite/vehicle', methods=['DELETE'])
+@app.route('/favorite/vehicle', methods=['DELETE'])
 def remove_favorite_vehicle():
     body = request.get_json()
     user_id = body["user_id"]
@@ -590,14 +665,23 @@ def get_favorites_with_post():
     }), 200
 
 @app.route('/favorites/<int:user_id>', methods=['GET'])
+@jwt_required()
 def get_favorites(user_id):
+    current_user = get_jwt_identity() # Get the current user ID from the token
+    if user_id != current_user: # Check if the requested user ID matches the current user ID
+        raise APIException('Unauthorized', status_code=401)
+    
     user = User.query.get(user_id)
     if not user:
         raise APIException('User not found', status_code=404)
 
-    favorite_people = list(map(lambda item: item.serialize()["people_name"], FavoritePeople.query.filter_by(user_id=user.id)))
-    favorite_planets = list(map(lambda item: item.serialize()["planet_name"], FavoritePlanets.query.filter_by(user_id=user.id)))
-    favorite_vehicles = list(map(lambda item: item.serialize()["vehicle_name"], FavoriteVehicles.query.filter_by(user_id=user.id)))
+    token = verificacionToken(get_jwt()["jti"])
+    if token:
+       raise APIException('Token está en lista negra', status_code=404)
+
+    favorite_people = list(map(lambda item: item.serialize()["people_name"], FavoritePeople.query.filter_by(user_id=current_user)))
+    favorite_planets = list(map(lambda item: item.serialize()["planet_name"], FavoritePlanets.query.filter_by(user_id=current_user)))
+    favorite_vehicles = list(map(lambda item: item.serialize()["vehicle_name"], FavoriteVehicles.query.filter_by(user_id=current_user)))
 
     return jsonify({
         "msg":"ok",
@@ -606,6 +690,7 @@ def get_favorites(user_id):
         "favorite_planets": favorite_planets,
         "favorite_vehicles": favorite_vehicles
     }), 200
+
 
 
 # this only runs if `$ python src/app.py` is executed
