@@ -652,16 +652,13 @@ def get_favorites_with_post():
     if not user:
         raise APIException('User not found', status_code=404)
 
-    favorite_people = list(map(lambda item: item.serialize()["people_name"], FavoritePeople.query.filter_by(user_id=user.id)))
-    favorite_planets = list(map(lambda item: item.serialize()["planet_name"], FavoritePlanets.query.filter_by(user_id=user.id)))
-    favorite_vehicles = list(map(lambda item: item.serialize()["vehicle_name"], FavoriteVehicles.query.filter_by(user_id=user.id)))
+    favorite_people = list(map(lambda item: {"name": item.serialize()["people_name"], "id": item.serialize()["people_id"], "url": "/people"}, FavoritePeople.query.filter_by(user_id=user.id)))
+    favorite_planets = list(map(lambda item: {"name": item.serialize()["planet_name"], "id": item.serialize()["planet_id"], "url": "/planets"}, FavoritePlanets.query.filter_by(user_id=user.id)))
+    favorite_vehicles = list(map(lambda item: {"name": item.serialize()["vehicle_name"], "id": item.serialize()["vehicle_id"], "url": "/vehicles"}, FavoriteVehicles.query.filter_by(user_id=user.id)))
 
     return jsonify({
         "msg":"ok",
         "all_favorites": favorite_people + favorite_planets + favorite_vehicles,
-        "favorite_people": favorite_people,
-        "favorite_planets": favorite_planets,
-        "favorite_vehicles": favorite_vehicles
     }), 200
 
 @app.route('/favorites/<int:user_id>', methods=['GET'])
@@ -679,16 +676,13 @@ def get_favorites(user_id):
     if token:
        raise APIException('Token está en lista negra', status_code=404)
 
-    favorite_people = list(map(lambda item: item.serialize()["people_name"], FavoritePeople.query.filter_by(user_id=current_user)))
-    favorite_planets = list(map(lambda item: item.serialize()["planet_name"], FavoritePlanets.query.filter_by(user_id=current_user)))
-    favorite_vehicles = list(map(lambda item: item.serialize()["vehicle_name"], FavoriteVehicles.query.filter_by(user_id=current_user)))
+    favorite_people = list(map(lambda item: {"name": item.serialize()["people_name"], "id": item.serialize()["people_id"], "url": "/people"}, FavoritePeople.query.filter_by(user_id=current_user)))
+    favorite_planets = list(map(lambda item: {"name": item.serialize()["planet_name"], "id": item.serialize()["planet_id"], "url": "/planets"}, FavoritePlanets.query.filter_by(user_id=current_user)))
+    favorite_vehicles = list(map(lambda item: {"name": item.serialize()["vehicle_name"], "id": item.serialize()["vehicle_id"], "url": "/vehicles"}, FavoriteVehicles.query.filter_by(user_id=current_user)))
 
     return jsonify({
         "msg":"ok",
         "all_favorites": favorite_people + favorite_planets + favorite_vehicles,
-        "favorite_people": favorite_people,
-        "favorite_planets": favorite_planets,
-        "favorite_vehicles": favorite_vehicles
     }), 200
 
 

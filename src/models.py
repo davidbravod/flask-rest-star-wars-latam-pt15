@@ -28,7 +28,7 @@ class People(db.Model):
     name = db.Column(db.String(120), unique=False, nullable=False)
     birthdate = db.Column(db.String(80), unique=False, nullable=False)
     eyes = db.Column(db.String(80), unique=False, nullable=False)
-    height = db.Column(db.String(5), unique=False, nullable=False)
+    height = db.Column(db.Float, unique=False, nullable=False)
     favorite_people = db.relationship('FavoritePeople', backref= 'people', lazy=True)
 
     def __repr__(self):
